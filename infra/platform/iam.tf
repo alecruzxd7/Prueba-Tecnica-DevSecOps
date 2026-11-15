@@ -52,30 +52,3 @@ resource "google_project_iam_member" "cicd_log_writer" {
   role    = "roles/logging.logWriter"
   member  = "serviceAccount:${google_service_account.cicd.email}"
 }
-
-# 5. Permisos mínimos para Binary Authorization (firmar con KMS y registrar la atestación)
-resource "google_kms_crypto_key_iam_member" "cicd_signer" {
-  crypto_key_id = google_kms_crypto_key.attestor_key.id
-  role          = "roles/cloudkms.signerVerifier"
-  member        = "serviceAccount:${google_service_account.cicd.email}"
-}
-
-resource "google_binary_authorization_attestor_iam_member" "cicd_attestor_viewer" {
-  project  = var.project_id
-  attestor = google_binary_authorization_attestor.cicd_attestor.name
-  role     = "roles/binaryauthorization.attestorsViewer"
-  member   = "serviceAccount:${google_service_account.cicd.email}"
-}
-
-resource "google_container_analysis_note_iam_member" "cicd_note_attacher" {
-  project = var.project_id
-  note    = google_container_analysis_note.attestor_note.name
-  role    = "roles/containeranalysis.notes.attacher"
-  member  = "serviceAccount:${google_service_account.cicd.email}"
-}
-
-resource "google_project_iam_member" "cicd_occurrences_editor" {
-  project = var.project_id
-  role    = "roles/containeranalysis.occurrences.editor"
-  member  = "serviceAccount:${google_service_account.cicd.email}"
-}

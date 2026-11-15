@@ -54,7 +54,7 @@ variable "github_owner" {
 variable "github_repo" {
   description = "Nombre del repositorio en GitHub."
   type        = string
-  default     = "Prueba-Tenica-DevOps"
+  default     = "Prueba-Tecnica-DevSecOps"
 }
 
 variable "enable_github_triggers" {

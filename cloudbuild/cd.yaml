@@ -2,6 +2,10 @@ substitutions:
   _REGION: us-central1
   _AR_REPO: tramites-repo
   _SERVICE_NAME: tramites-app
+  _ATTESTOR_NAME: tramites-app-attestor
+  _KMS_KEYRING: tramites-app-binauthz-kr
+  _KMS_KEY: tramites-app-attestor-key
+  _KMS_VERSION: "1"
 
 steps:
   # 1. Pruebas unitarias y extracción de versión SemVer desde package.json
@@ -43,9 +47,10 @@ steps:
 
         DIGEST=$$(docker inspect --format='{{index .RepoDigests 0}}' "$${IMAGE_BASE}:$${VERSION_TAG}")
         echo "$${DIGEST}" > /workspace/image_digest.txt
+        echo "$${VERSION_TAG}" > /workspace/version_tag.txt
         echo "Imagen publicada con digest inmutable: $${DIGEST}"
 
-  # 3. Escaneo de vulnerabilidades con Trivy
+  # 3. Escaneo de vulnerabilidades de la imagen publicada con Trivy
   - id: trivy-scan
     name: aquasec/trivy:0.58.1
     entrypoint: sh
@@ -55,7 +60,28 @@ steps:
         IMAGE_DIGEST=$$(cat /workspace/image_digest.txt)
         trivy image --no-progress --severity HIGH,CRITICAL --exit-code 0 "$${IMAGE_DIGEST}"
 
-  # 4. Despliegue en Cloud Run por digest inmutable (@sha256:...)
+  # 4. Firma criptográfica (Cloud KMS) y registro de atestación (Binary Authorization)
+  - id: attest-image
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE_DIGEST=$$(cat /workspace/image_digest.txt)
+        echo "Firmando y atestando imagen con Binary Authorization: $${IMAGE_DIGEST}"
+        gcloud beta container binauthz attestations sign-and-create \
+          --project="${PROJECT_ID}" \
+          --artifact-url="$${IMAGE_DIGEST}" \
+          --attestor="${_ATTESTOR_NAME}" \
+          --attestor-project="${PROJECT_ID}" \
+          --keyversion-project="${PROJECT_ID}" \
+          --keyversion-location="${_REGION}" \
+          --keyversion-keyring="${_KMS_KEYRING}" \
+          --keyversion-key="${_KMS_KEY}" \
+          --keyversion="${_KMS_VERSION}"
+
+  # 5. Despliegue en Cloud Run usando el digest inmutable (@sha256:...) ya atestado
   - id: deploy-cloud-run
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: bash
@@ -64,6 +90,7 @@ steps:
       - |
         set -euo pipefail
         IMAGE_DIGEST=$$(cat /workspace/image_digest.txt)
+        echo "Desplegando en Cloud Run (protegido por Binary Authorization): $${IMAGE_DIGEST}"
         gcloud run deploy "${_SERVICE_NAME}" \
           --project="${PROJECT_ID}" \
           --region="${_REGION}" \
@@ -71,7 +98,7 @@ steps:
           --platform=managed \
           --quiet
 
-  # 5. Smoke test contra /health y /api/tramites/TR-000123
+  # 6. Smoke test contra la revisión recién desplegada (/health y /api/tramites/TR-000123)
   - id: smoke-test
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: bash
@@ -83,9 +110,12 @@ steps:
           --project="${PROJECT_ID}" \
           --region="${_REGION}" \
           --format='value(status.url)')
+        echo "Verificando $${SERVICE_URL}/health ..."
         HEALTH=$$(curl -fsSL "$${SERVICE_URL}/health")
         echo "Respuesta /health: $${HEALTH}"
         echo "$${HEALTH}" | grep -q '"secretConfigured":true'
+
+        echo "Verificando $${SERVICE_URL}/api/tramites/TR-000123 ..."
         TRAMITE=$$(curl -fsSL "$${SERVICE_URL}/api/tramites/TR-000123")
         echo "Respuesta trámite: $${TRAMITE}"
         echo "$${TRAMITE}" | grep -q '"id":"TR-000123"'

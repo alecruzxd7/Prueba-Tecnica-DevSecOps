@@ -1,0 +1,9 @@
+# Copia este archivo a terraform.tfvars (ignorado por Git) y coloca tu billing_account_id:
+#   Copy-Item terraform.tfvars.example terraform.tfvars
+project_id             = "prueba-tecnica-devops-514820"
+region                 = "us-central1"
+billing_account_id     = "000000-000000-000000"
+budget_amount_usd      = 10
+github_owner           = "alecruzxd7"
+github_repo            = "prueba-tecnica-devops"
+enable_github_triggers = false

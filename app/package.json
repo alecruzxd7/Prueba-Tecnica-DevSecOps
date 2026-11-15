@@ -1,0 +1,28 @@
+{
+  "name": "tramites-app",
+  "version": "0.1.0",
+  "description": "Servicio de consulta de estado de trámite - Ministerio de Trámites Ciudadanos (ficticio)",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "concurrently -k -n api,web \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "node --watch --env-file=../.env server/index.js",
+    "dev:web": "vite",
+    "build": "vite build",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "5.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.3.0",
+    "concurrently": "10.0.7",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vite": "8.3.8"
+  }
+}

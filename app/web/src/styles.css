@@ -1,0 +1,86 @@
+:root {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: #1f2937;
+  background: #f3f4f6;
+}
+
+body {
+  margin: 0;
+}
+
+.contenedor {
+  max-width: 560px;
+  margin: 4rem auto;
+  padding: 2rem;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #1e3a8a;
+}
+
+.subtitulo {
+  margin-top: 0.25rem;
+  color: #6b7280;
+}
+
+label {
+  display: block;
+  margin: 1.5rem 0 0.5rem;
+  font-weight: 600;
+}
+
+.fila {
+  display: flex;
+  gap: 0.5rem;
+}
+
+input {
+  flex: 1;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+button {
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  background: #1e3a8a;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.error {
+  margin-top: 1rem;
+  color: #b91c1c;
+}
+
+.resultado {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  border-left: 6px solid #9ca3af;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.resultado h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.estado-recibido { border-color: #3b82f6; }
+.estado-en_revision { border-color: #f59e0b; }
+.estado-aprobado { border-color: #10b981; }
+.estado-rechazado { border-color: #ef4444; }

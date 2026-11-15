@@ -1,0 +1,78 @@
+# ============================================================================
+# Pipeline de Continous Integration (CI) - Se ejecuta en cada Pull Request a main
+# Corre con la Service Account dedicada: sa-cloudbuild-cicd
+# ============================================================================
+
+steps:
+  # 1. Escaneo de secretos en el historial y árbol de trabajo (Regla 3: cero secretos)
+  - id: secret-scan
+    name: zricethezav/gitleaks:v8.21.2
+    args:
+      - detect
+      - --source=.
+      - --verbose
+      - --redact
+
+  # 2. Linting del Dockerfile (valida buenas prácticas y usuario no-root)
+  - id: dockerfile-lint
+    name: hadolint/hadolint:v2.12.0
+    args:
+      - hadolint
+      - --ignore
+      - DL3006
+      - app/Dockerfile
+
+  # 3. Pruebas unitarias de la API y compilación del frontend React
+  - id: unit-tests-and-build
+    name: node:24.15.0-bookworm-slim
+    dir: app
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        npm ci --no-audit --no-fund
+        npm test
+        npm run build
+
+  # 4. Validación de formato y sintaxis de Terraform (sin tocar el estado remoto)
+  - id: terraform-validate
+    name: hashicorp/terraform:1.11.4
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -eu
+        terraform fmt -check -recursive infra
+        cd infra/bootstrap && terraform init -backend=false && terraform validate
+        cd ../platform && terraform init -backend=false && terraform validate
+
+  # 5. Build de verificación de la imagen Docker y escaneo de vulnerabilidades (SCA/Container)
+  - id: docker-build
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SHA_TAG="${SHORT_SHA}"
+        SHA_TAG="$${SHA_TAG:-local}"
+        docker build \
+          --build-arg APP_VERSION="0.1.0-$${SHA_TAG}" \
+          -t "tramites-app:ci-$${SHA_TAG}" \
+          app
+
+  - id: trivy-vuln-scan
+    name: aquasec/trivy:0.58.1
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        SHA_TAG="${SHORT_SHA}"
+        SHA_TAG="$${SHA_TAG:-local}"
+        trivy image --no-progress --severity HIGH,CRITICAL --exit-code 0 "tramites-app:ci-$${SHA_TAG}"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 600s

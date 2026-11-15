@@ -1,0 +1,96 @@
+substitutions:
+  _REGION: us-central1
+  _AR_REPO: tramites-repo
+  _SERVICE_NAME: tramites-app
+
+steps:
+  # 1. Pruebas unitarias y extracción de versión SemVer desde package.json
+  - id: test
+    name: node:24.15.0-bookworm-slim
+    dir: app
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        npm ci --no-audit --no-fund
+        npm test
+        node -p "require('./package.json').version" > /workspace/semver.txt
+
+  # 2. Construcción y publicación con versión fija (SemVer-SHA y SHA, nunca :latest)
+  - id: build-and-push
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SEMVER=$$(cat /workspace/semver.txt)
+        COMMIT_SHA="${SHORT_SHA}"
+        COMMIT_SHA="$${COMMIT_SHA:-manual}"
+        VERSION_TAG="$${SEMVER}-$${COMMIT_SHA}"
+        IMAGE_BASE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}"
+
+        echo "Construyendo $${IMAGE_BASE}:$${VERSION_TAG} (sin tag :latest)..."
+        docker build \
+          --build-arg APP_VERSION="$${VERSION_TAG}" \
+          -t "$${IMAGE_BASE}:$${VERSION_TAG}" \
+          -t "$${IMAGE_BASE}:$${COMMIT_SHA}" \
+          app
+
+        docker push "$${IMAGE_BASE}:$${VERSION_TAG}"
+        docker push "$${IMAGE_BASE}:$${COMMIT_SHA}"
+
+        DIGEST=$$(docker inspect --format='{{index .RepoDigests 0}}' "$${IMAGE_BASE}:$${VERSION_TAG}")
+        echo "$${DIGEST}" > /workspace/image_digest.txt
+        echo "Imagen publicada con digest inmutable: $${DIGEST}"
+
+  # 3. Escaneo de vulnerabilidades con Trivy
+  - id: trivy-scan
+    name: aquasec/trivy:0.58.1
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        IMAGE_DIGEST=$$(cat /workspace/image_digest.txt)
+        trivy image --no-progress --severity HIGH,CRITICAL --exit-code 0 "$${IMAGE_DIGEST}"
+
+  # 4. Despliegue en Cloud Run por digest inmutable (@sha256:...)
+  - id: deploy-cloud-run
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE_DIGEST=$$(cat /workspace/image_digest.txt)
+        gcloud run deploy "${_SERVICE_NAME}" \
+          --project="${PROJECT_ID}" \
+          --region="${_REGION}" \
+          --image="$${IMAGE_DIGEST}" \
+          --platform=managed \
+          --quiet
+
+  # 5. Smoke test contra /health y /api/tramites/TR-000123
+  - id: smoke-test
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SERVICE_URL=$$(gcloud run services describe "${_SERVICE_NAME}" \
+          --project="${PROJECT_ID}" \
+          --region="${_REGION}" \
+          --format='value(status.url)')
+        HEALTH=$$(curl -fsSL "$${SERVICE_URL}/health")
+        echo "Respuesta /health: $${HEALTH}"
+        echo "$${HEALTH}" | grep -q '"secretConfigured":true'
+        TRAMITE=$$(curl -fsSL "$${SERVICE_URL}/api/tramites/TR-000123")
+        echo "Respuesta trámite: $${TRAMITE}"
+        echo "$${TRAMITE}" | grep -q '"id":"TR-000123"'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 900s

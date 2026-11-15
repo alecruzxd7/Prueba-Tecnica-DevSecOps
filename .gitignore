@@ -1,0 +1,37 @@
+# Secretos y Credenciales
+
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*-key.json
+*_key.json
+*credentials*.json
+*service-account*.json
+application_default_credentials.json
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+
+# Node - frontend
+node_modules/
+dist/
+npm-debug.log*
+coverage/
+
+# Sistema/Editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -4,6 +4,10 @@ resource "google_cloud_run_v2_service" "app" {
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false # Terraform destroy para destruccion complerta
 
+  binary_authorization {
+    use_default = true
+  }
+
   template {
     service_account                  = google_service_account.run_runtime.email
     max_instance_request_concurrency = 80

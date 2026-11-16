@@ -22,3 +22,13 @@ output "secret_id" {
   description = "Nombre del secreto en Secret Manager."
   value       = google_secret_manager_secret.api_key.secret_id
 }
+
+output "binauthz_attestor" {
+  description = "Nombre del attestor de Binary Authorization."
+  value       = google_binary_authorization_attestor.cicd_attestor.name
+}
+
+output "kms_signing_key_version" {
+  description = "ID de la versión de la llave asimétrica en Cloud KMS usada para firmar imágenes."
+  value       = data.google_kms_crypto_key_version.attestor_key_v1.id
+}

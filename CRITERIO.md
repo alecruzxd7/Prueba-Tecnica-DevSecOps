@@ -1,46 +1,35 @@
-# Parte C: Preguntas de Criterio — Ingeniero DevOps Senior
+# Parte C: Preguntas de Criterio
 
-## 1. Golden Path para este servicio
-1. **Qué incluye:** Un repositorio plantilla (*template*) para Go, Python y React con Dockerfile multistage *distroless* no-root, `.gitignore` y `.env.example`.
-2. **Infraestructura estandarizada:** Un módulo versionado de Terraform que aprovisiona Cloud Run (`min=0`), Secret Manager, Service Accounts de mínimo privilegio y alertas de presupuesto.
-3. **Pipeline llave en mano:** Workflows reutilizables de Cloud Build con validaciones obligatorias en PR (Gitleaks, Hadolint, tests, Trivy) y despliegue en `main` por digest inmutable (`@sha256`).
-4. **Seguridad por defecto:** Firma criptográfica con Cloud KMS y verificación con Binary Authorization antes de admitir cualquier revisión en Cloud Run, más logs estructurados en JSON.
-5. **Qué dejo fuera a propósito (y descarté):** Descarté GKE e Istio/Service Mesh por sobrecosto y carga operativa para una API *stateless*; dejo fuera bases de datos dedicadas, pipelines a medida por equipo y cambios manuales en consola.
-6. **Métricas de adopción y éxito:** Porcentaje de servicios en producción nacidos del *template* (meta >85%), tiempo desde la creación del repo hasta el primer deploy en producción (<30 min), proporción de despliegues vía pipeline vs. *break-glass* y encuesta trimestral de fricción (DX) a los equipos de desarrollo.
+## 1. En 10 líneas o menos, describe un Golden Path para este servicio: qué incluye, qué dejas fuera a propósito y cómo medirías si los equipos lo usan.
 
----
-
-## 2. Conectividad segura: Cloud Run ↔ Sistema On-Premise (SOAP) ↔ AWS
-
-### Qué haría y por qué
-1. **Salida privada desde Cloud Run:** Configuraría **Direct VPC Egress** desde Cloud Run hacia una subred de una Shared VPC en GCP, forzando que el tráfico hacia rangos privados salga por la VPC sin pagar instancias fijas de *Serverless VPC Access Connector*.
-2. **Tramo GCP ↔ On-Premise (SOAP):**
-   - **Red:** **HA VPN (Cloud VPN con dos túneles IPSec activos/activos y BGP dinámico con Cloud Router)** entre la VPC de GCP y el firewall perimetral del datacenter gubernamental (~USD 73/mes, SLA 99.99%).
-   - **Aplicación y seguridad:** Como los sistemas SOAP legacy suelen ser frágiles y lentos, colocaría un adaptador interno (o Envoy/Apigee interno) con **mTLS**, timeouts estrictos (3–5 s), *circuit breaker* y caché de corto plazo en Memorystore/en memoria para no saturar el backend on-premise ante picos ciudadanos. Las credenciales WS-Security/certificados vivirían en **Secret Manager**.
-3. **Tramo GCP ↔ AWS:**
-   - **Identidad (cero llaves estáticas):** Usaría **Workload Identity Federation cruzada (OIDC)**: Cloud Run presenta el token OIDC de `sa-tramites-run` a AWS STS (`AssumeRoleWithWebIdentity`) para asumir un IAM Role en AWS con permisos mínimos y credenciales temporales de 15 minutos.
-   - **Red:** Si el servicio en AWS es un endpoint HTTPS (API Gateway/ALB), saldría por **TLS 1.3** autenticado con IAM SigV4 y restringido por IP de **Cloud NAT** estática + AWS WAF. Si es un recurso privado (RDS/ECS interno), levantaría un segundo par de túneles **Site-to-Site IPSec VPN con BGP** entre el *Virtual Private Gateway* de AWS y el *Cloud Router* de GCP.
-
-### Qué descarté y por qué
-- **Dedicated / Partner Interconnect y AWS Direct Connect (de entrada):** Los descarté para el lanzamiento porque implican meses de provisión con telcos y cientos de dólares mensuales fijos; solo se justifican si el tráfico sostenido supera varios Gbps o requiere latencia determinística sub-10ms.
-- **Exponer el SOAP on-premise a internet con IP Whitelisting:** Descartado por riesgo alto de seguridad en sistemas legacy (XML External Entity, falta de parches).
-- **Guardar `AWS_ACCESS_KEY_ID` / `AWS_SECRET` estáticas en Secret Manager:** Descartado porque las llaves IAM de larga vida son el vector número uno de filtración; OIDC elimina el secreto estático por completo.
+Armaría una plantilla de repositorio lista para clonar (para Go, Python y React) que ya traiga el Dockerfile multistage con usuario no-root, `.gitignore`, `.env.example` y logs en JSON para Cloud Logging.
+Por el lado de infraestructura, les daría un módulo de Terraform ya probado que levante Cloud Run (`min=0`), Secret Manager, las Service Accounts con permisos mínimos y la alerta de presupuesto sin que el equipo tenga que escribir IAM desde cero.
+El pipeline en Cloud Build vendría preconfigurado en dos archivos: uno para PRs (tests, Gitleaks, Hadolint y Trivy) y otro para `main` que publique con versión fija, firme la imagen con KMS y despliegue por digest con Binary Authorization activo.
+Dejo fuera a propósito Kubernetes (GKE), Service Mesh y bases de datos propias por servicio, porque para un servicio de consulta stateless solo meten costo fijo y carga operativa que el equipo no necesita. También dejo fuera que cada equipo arme su propio pipeline a mano o pida permisos por consola.
+Para medir si de verdad lo están usando, revisaría cuántos servicios nuevos nacen desde la plantilla vs. repos armados por su cuenta, cuánto tardan desde que crean el repo hasta su primer deploy en producción y cuántas veces piden soporte a DevOps para poder desplegar.
 
 ---
 
-## 3. Controles para evitar que `dev` gaste USD 2,000 en un fin de semana
+## 2. El servicio tiene que consultar un sistema on-premise (SOAP) y un servicio en AWS. ¿Cómo conectas las tres partes de forma segura? Considera costo y riesgo.
 
-Una sola barrera no basta; aplicaría **tres capas de defensa**:
+**Cómo lo conectaría:**
+- **De Cloud Run hacia adentro:** Usaría **Direct VPC Egress** en Cloud Run saliendo hacia nuestra VPC en GCP. Descarté usar *Serverless VPC Access Connectors* porque dejan instancias e2 encendidas cobrando todo el mes aunque no haya tráfico.
+- **De GCP al sistema SOAP on-premise:** Levantaría una **HA VPN (Cloud VPN con IPSec y BGP en Cloud Router)** contra el firewall del datacenter. Cuesta alrededor de USD 70 al mes los dos túneles y da buena disponibilidad sin meterse al gasto de un enlace dedicado. Como los servicios SOAP viejos suelen ser lentos y si reciben muchas peticiones de golpe se caen, pondría un timeout corto (3 a 5 segundos), un *circuit breaker* y un caché corto (por ejemplo 1 o 2 minutos en memoria o Memorystore) para que si un ciudadano recarga la página 10 veces seguidas no golpeemos 10 veces al servidor on-premise. Los certificados o credenciales del SOAP los leería desde Secret Manager.
+- **De GCP a AWS:** Para la autenticación **descarté guardar llaves estáticas (`AWS_ACCESS_KEY_ID`) en Secret Manager** porque si se filtran son un problema grave. En su lugar usaría **Workload Identity Federation (OIDC)**: la Service Account de Cloud Run usa su token OIDC para asumir un rol en AWS (`AssumeRoleWithWebIdentity`) con credenciales temporales. A nivel de red, si lo que consumimos en AWS es una API por HTTPS, saldría por TLS 1.3 pasando por Cloud NAT (para tener IP fija si del lado de AWS piden filtrar origen). Si es un servicio privado dentro de la VPC de AWS, levantaría otra VPN Site-to-Site IPSec entre AWS y el mismo Cloud Router de GCP.
+- **Qué más descarté:** Descarté **Dedicated/Partner Interconnect** y **AWS Direct Connect** porque para un solo servicio de consulta es demasiado caro y toma semanas con el proveedor; solo valdría la pena si ya estuviéramos moviendo tráfico pesado de varios ministerios. Tampoco expondría jamás el SOAP a internet público aunque tuviera IP whitelist.
 
-1. **Límites duros en tiempo de ejecución y Cuotas (Prevención — impiden el gasto antes de que ocurra):**
-   - En Cloud Run (`dev`): `min_instance_count = 0`, **`max_instance_count = 3`**, `cpu_idle = true` y concurrencia de 80 (incluso ante un bucle infinito o un ataque de tráfico el sábado por la noche, 3 instancias con tope de CPU gastan menos de USD 5 en todo el fin de semana).
-   - **Organization Policies y Quotas en el proyecto `dev`:** Bloquear la creación de recursos costosos (`constraints/compute.restrictVmSku` permitiendo solo series `e2-micro`/`e2-small`, denegar GPUs/TPUs, prohibir IPs públicas innecesarias y limitar `maximumBytesBilled` por consulta en BigQuery).
-   - **CI/CD con Infracost o validación en PR:** Bloquear en el Pull Request cualquier cambio de Terraform en `dev` que suba `max_instance_count`, cambie `min_instance_count > 0` o agregue instancias dedicadas.
-2. **Apagado programado (Higiene fuera de horario laboral):**
-   - Un job de **Cloud Scheduler** (viernes 19:00 a lunes 06:00, hora de El Salvador) que detenga instancias de Compute Engine/Cloud SQL de desarrollo y limpie artefactos temporales, más *cleanup policies* en Artifact Registry (conservar solo las últimas 5 imágenes).
-3. **Presupuesto con *Circuit Breaker* automático (Detección y corte):**
-   - **Cloud Billing Budget** mensual bajo en `dev` (ej. USD 30) con umbrales al 50%, 80% y 100% conectado a un tópico de **Pub/Sub** que dispara una **Cloud Run Function**. Si el gasto de `dev` supera el 100%, la función envía alerta al canal de guardia de SRE y **ejecuta contención automática** (deshabilitar temporalmente los servicios costosos o desvincular la cuenta de facturación del proyecto `dev`).
+---
 
-### Qué descarté y por qué
-- **Confiar solo en alertas de presupuesto por correo electrónico:** Los datos de facturación tienen latencia y nadie revisa correos de alertas un domingo en la madrugada; sin cuotas duras (`max_instances`) ni *circuit breaker* por Pub/Sub, el lunes a las 8:00 AM el gasto ya ocurrió.
-- **Aplicar apagado automático por presupuesto en producción:** El *kill-switch* que desvincula facturación solo se aplica en `dev`/`sandbox`; en producción provocaría una caída total de un servicio ciudadano.
+## 3. ¿Qué controles pondrías para que un ambiente de desarrollo no gaste USD 2,000 en un fin de semana?
+
+**Descarté quedarme solo con la alerta de presupuesto por correo**, porque los correos de facturación llegan con retraso y si algo se queda en un ciclo infinito un sábado en la noche, nadie va a ver el correo hasta el lunes cuando ya se gastaron los USD 2,000.
+
+Pondría tres controles prácticos combinados:
+
+1. **Topes duros en los recursos y cuotas del proyecto `dev`:**
+   - En Cloud Run dejaría `min_instance_count = 0`, `cpu_idle = true` y un **`max_instance_count` bajo (2 o 3 instancias)**. Con ese tope, aunque un dev deje un loop infinito o hagan pruebas de carga por error todo el fin de semana, 3 instancias no pasan de unos pocos dólares.
+   - A nivel de proyecto en GCP aplicaría **Organization Policies y cuotas de API** para bloquear en `dev` cosas que disparan la factura rápido: prohibir GPUs, máquinas grandes de Compute Engine (permitir solo `e2-micro` o `e2-small`), clusters grandes de GKE y poner límite de bytes procesados por query en BigQuery.
+2. **Apagado automático fuera de horario:**
+   - En `dev` nadie trabaja de madrugada ni domingo. Pondría un job en **Cloud Scheduler** los viernes a las 7:00 PM que apague cualquier VM o instancia de base de datos de desarrollo y las vuelva a encender el lunes a las 6:00 AM.
+3. **Presupuesto con corte automático (Pub/Sub + Cloud Run Function):**
+   - Configuraría un presupuesto bajo para `dev` (por ejemplo USD 30 o USD 50 al mes) conectado a un tópico de **Pub/Sub**. Si llega al 100%, además de mandar mensaje al chat del equipo, dispara una función que apaga los servicios del proyecto `dev` o desvincula temporalmente la facturación de ese proyecto. Esto lo descartaría en producción porque tiraría el servicio, pero para un ambiente de desarrollo es el seguro más efectivo.
